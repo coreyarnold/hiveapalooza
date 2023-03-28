@@ -3,14 +3,12 @@
 import smbus2
 import bme280
 import os
+import queue
 import socket
 import time
 import requests
 from newrelic_telemetry_sdk import GaugeMetric, CountMetric, SummaryMetric, MetricClient
 from dotenv import load_dotenv
-
-#make sure to wait for the machine to connect to the network
-
 
 load_dotenv()
 
@@ -37,8 +35,8 @@ def measure_bme280_one():
 	readings = []
 	data = bme280.sample(bus, address, calibration_params)
 	print(data)
-	readings.append(GaugeMetric("temperature", convert_c_to_f(data.temperature), {"units": "Farenheit","host.name": hostname, "hive.id": hiveid}))
-	readings.append(pressure = GaugeMetric("pressure", data.pressure, {"units": "hPa","host.name": hostname}))
+	readings.append(GaugeMetric("temperature", convert_c_to_f(data.temperature), {"units": "Farenheit","host.name": hostname}))
+	readings.append(GaugeMetric("pressure", data.pressure, {"units": "hPa","host.name": hostname}))
 	readings.append(GaugeMetric("humidity", data.humidity, {"units": "% rH","host.name": hostname}))
 
 	return readings
@@ -50,36 +48,25 @@ def is_cnx_active(timeout):
     except requests.ConnectionError:
         return False
 
-# the sample method will take a single reading and return a
-# compensated_reading object
-#data = bme280.sample(bus, address, calibration_params)
-
-# the compensated_reading class has the following attributes
-#print(data.id)
-#print(data.timestamp)
-#print(data.temperature)
-#print(data.pressure)
-#print(data.humidity)
-
-# there is a handy string representation too
-#print(data)
-
-while True:
-	if is_cnx_active(10) is True:
-		print("internet is active... yay")
-		break
-	else:
-		print("no internet yet, sleeping for a bit :(")
-		time.sleep(30)
-
+data_queue = queue.Queue()
 
 while True:
 	readings = measure_bme280_one()
-
+	data_queue.put(readings)
+#	with open("temperature_log.txt", "a") as file:
+#		file.write(f"{time.time()}, {temperature / 100.0}, {humidity / 1024.0}\n")
+	print(readings)
+	
 	try:
 		response = metric_client.send_batch(readings)
 		response.raise_for_status()
 		print("Sent metrics successfully!")
-		time.sleep(60)
+
+		while(data_queue.empty()==False):
+			print(data_queue.queue[0],end=" ")
+			data_queue.get()
+			
 	except:
 		print("problem sending data:",)
+	time.sleep(60)
+	
